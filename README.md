@@ -113,48 +113,7 @@ Design notes:
   are all caught, logged as failed requests, and returned to the caller as a
   generic, non-leaking error message — raw stack traces are never exposed.
 
-## 5. Deploying online (free hosting)
-
-### Option A — Render.com (recommended, simplest)
-
-1. Push this project to a GitHub repo.
-2. On https://render.com → **New +** → **Web Service** → connect your repo.
-3. Settings:
-   - Build command: `npm install`
-   - Start command: `npm start`
-   - Instance type: **Free**
-4. Add environment variables (from your `.env`) in the Render dashboard's
-   **Environment** tab: `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`,
-   `GROQ_API_KEY`, `GEMINI_API_KEY`. Do **not** commit your real `.env` file.
-5. Deploy. Render gives you a public URL like `https://your-app.onrender.com`.
-6. **Persistence note:** the free tier's disk is ephemeral across deploys/restarts
-   in some plans. For a graded demo this is fine (data persists while the
-   service is running). For guaranteed durability, add a Render **persistent
-   disk** mounted at `/opt/render/project/src/data`, or switch `src/db.js` to a
-   hosted free Postgres (e.g. Neon or Supabase) later.
-
-### Option B — Railway.app
-
-1. Push to GitHub, then **New Project → Deploy from GitHub repo** on
-   https://railway.app.
-2. Add the same environment variables under **Variables**.
-3. Railway auto-detects `npm start`. Add a **Volume** mounted at `/app/data` if
-   you want the SQLite file to survive redeploys.
-4. Deploy; Railway gives you a public `*.up.railway.app` URL.
-
-### Option C — Fly.io / Cyclic / Glitch
-
-Any Node-friendly free host works the same way: install deps, run
-`npm start`, set the same environment variables, expose the port from `PORT`.
-
-After deploying, verify:
-- `GET https://your-url/health` → `{"status":"ok",...}`
-- Log into `/index.html` with your admin credentials
-- Create/test a connector, then call its generated endpoint with `curl` from
-  outside the browser to confirm it works without being logged into the
-  dashboard (as the assignment requires).
-
-## 6. Security checklist
+## 5. Security checklist
 
 - [x] Provider API keys live only in server environment variables
 - [x] Admin dashboard requires login (JWT httpOnly cookie)
@@ -167,17 +126,3 @@ After deploying, verify:
       plain text, and HTTPS-only cookies (already toggled on when
       `NODE_ENV=production`).
 
-## 7. What's implemented vs. bonus
-
-Implemented: multi-provider adapter architecture, dynamic input fields (text,
-number, boolean, image, file, json), dynamic output schema, prompt engine,
-structured `{success, data, error}` responses, auto-generated docs (JSON +
-dashboard view) with example `curl`, in-dashboard Test API tool, persistent
-request logging (SQLite) with tokens/cost/latency/first-last-used, a
-management dashboard, model refresh from provider APIs, JSON response
-parsing/repair, and generic error handling with no raw errors leaked.
-
-Not implemented (left as future work): webhooks, API versioning, request-quota
-enforcement, retry/fallback across providers, import/export of connector
-configs.
-"# Universal-AI-API-Connector" 
