@@ -33,7 +33,6 @@ Requirements: Node.js 18+ (for built-in `fetch`).
 ```bash
 cd api-hub
 npm install
-cp .env.example .env
 ```
 
 Edit `.env`:
