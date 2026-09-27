@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI API Hub — Connector</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><div class="dot"></div><h1>AI API Hub</h1></div>
+    <div class="flex">
+      <a class="btn small" href="/dashboard.html">Dashboard</a>
+      <button class="btn small" id="logoutBtn">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="flex between mb">
+      <div>
+        <h2 id="cName" style="margin:0;">Loading…</h2>
+        <div class="muted" id="cSlug"></div>
+      </div>
+      <div class="flex">
+        <a class="btn" id="editLink" href="#">Edit</a>
+        <span id="cStatus"></span>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="test">Test API</div>
+      <div class="tab" data-tab="docs">Documentation</div>
+      <div class="tab" data-tab="stats">Stats & Logs</div>
+    </div>
+
+    <div id="tab-test">
+      <div class="card">
+        <div id="testFields"></div>
+        <button class="btn primary mt" id="runTest">Run test request</button>
+        <span id="testTiming" class="muted" style="margin-left:10px;"></span>
+      </div>
+      <div class="card" id="testResultCard" style="display:none;">
+        <strong>Response</strong>
+        <pre id="testResult"></pre>
+      </div>
+    </div>
+
+    <div id="tab-docs" style="display:none;"></div>
+
+    <div id="tab-stats" style="display:none;"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    let connector = null;
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await apiFetch('/api/admin/logout', { method: 'POST' });
+      location.href = '/index.html';
+    });
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        ['test', 'docs', 'stats'].forEach(name => {
+          document.getElementById(`tab-${name}`).style.display = name === tab.dataset.tab ? '' : 'none';
+        });
+        if (tab.dataset.tab === 'docs') loadDocs();
+        if (tab.dataset.tab === 'stats') loadStats();
+      });
+    });
+
+    function renderTestFields() {
+      const wrap = document.getElementById('testFields');
+      wrap.innerHTML = connector.input_schema.map(f => {
+        const req = f.required ? ' *' : '';
+        if (f.type === 'boolean') {
+          return `<label>${esc(f.name)}${req} <span class="muted">(${f.type})</span></label>
+            <select data-field="${esc(f.name)}" data-type="boolean"><option value="true">true</option><option value="false">false</option></select>`;
+        }
+        if (f.type === 'image' || f.type === 'file') {
+          return `<label>${esc(f.name)}${req} <span class="muted">(${f.type})</span></label>
+            <input type="file" data-field="${esc(f.name)}" data-type="${f.type}">`;
+        }
+        if (f.type === 'json') {
+          return `<label>${esc(f.name)}${req} <span class="muted">(json)</span></label>
+            <textarea data-field="${esc(f.name)}" data-type="json" placeholder='{"key":"value"}'>${esc(f.default || '')}</textarea>`;
+        }
+        return `<label>${esc(f.name)}${req} <span class="muted">(${f.type})</span>${f.description ? ' — ' + esc(f.description) : ''}</label>
+          <input data-field="${esc(f.name)}" data-type="${f.type}" value="${esc(f.default || '')}">`;
+      }).join('');
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    document.getElementById('runTest').addEventListener('click', async () => {
+      const values = {};
+      const images = [];
+      const nodes = document.querySelectorAll('[data-field]');
+      for (const node of nodes) {
+        const name = node.dataset.field;
+        const type = node.dataset.type;
+        if (type === 'image' || type === 'file') {
+          const file = node.files[0];
+          if (file) {
+            if (type === 'image') {
+              const base64 = await fileToBase64(file);
+              images.push({ mimeType: file.type, base64 });
+            } else {
+              values[name] = `${file.name} (${file.type})`;
+            }
+          }
+        } else if (type === 'json') {
+          try { values[name] = node.value ? JSON.parse(node.value) : undefined; }
+          catch (e) { values[name] = node.value; }
+        } else if (type === 'boolean') {
+          values[name] = node.value === 'true';
+        } else {
+          values[name] = node.value;
+        }
+      }
+
+      const resultCard = document.getElementById('testResultCard');
+      const resultEl = document.getElementById('testResult');
+      const timingEl = document.getElementById('testTiming');
+      resultCard.style.display = '';
+      resultEl.textContent = 'Running…';
+      timingEl.textContent = '';
+
+      const res = await apiFetch(`/api/admin/connectors/${id}/test`, {
+        method: 'POST',
+        body: JSON.stringify({ values, images })
+      });
+
+      resultEl.textContent = JSON.stringify(res, null, 2);
+      if (res.response_time_ms) timingEl.textContent = `${res.response_time_ms}ms`;
+    });
+
+    async function loadDocs() {
+      const el = document.getElementById('tab-docs');
+      el.innerHTML = '<div class="card">Loading…</div>';
+      const res = await apiFetch(`/api/admin/connectors/${id}/docs`);
+      if (!res.success) { el.innerHTML = `<div class="card error-text">${esc(res.error)}</div>`; return; }
+      const d = res.data;
+      el.innerHTML = `
+        <div class="card">
+          <div class="grid cols-2">
+            <div><label>Endpoint</label><pre>${d.endpoint.method} ${esc(d.endpoint.url)}</pre></div>
+            <div><label>Auth header</label><pre>x-api-key: ${esc(connector.api_key)}</pre>
+              <button class="btn small" id="regenKeyBtn">Regenerate key</button>
+            </div>
+          </div>
+          <label>Content type</label><pre>${esc(d.endpoint.content_type)}</pre>
+          <label>Parameters</label>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th><th>Default</th></tr></thead>
+            <tbody>${d.parameters.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.required ? 'Yes' : 'No'}</td><td>${esc(p.description)}</td><td>${esc(p.default ?? '—')}</td></tr>`).join('')}</tbody>
+          </table></div>
+          <label>Output schema</label>
+          <pre>${esc(JSON.stringify(d.output_schema, null, 2))}</pre>
+          <label>Example request (cURL)</label>
+          <pre>${esc(d.example_request_curl)}</pre>
+          <label>Example success response</label>
+          <pre>${esc(JSON.stringify(d.example_success_response, null, 2))}</pre>
+          <label>Example error response</label>
+          <pre>${esc(JSON.stringify(d.example_error_response, null, 2))}</pre>
+          <div id="regenMsg" class="mt"></div>
+          <label>Error status codes</label>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+            <tbody>${d.error_responses.map(e => `<tr><td>${e.status}</td><td>${esc(e.meaning)}</td></tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      `;
+
+      document.getElementById('regenKeyBtn').addEventListener('click', async () => {
+        if (!confirm('Regenerate the API key? Any existing integrations using the old key will stop working immediately.')) return;
+        const res = await apiFetch(`/api/admin/connectors/${id}/regenerate-key`, { method: 'POST' });
+        if (res.success) {
+          connector.api_key = res.data.api_key;
+          document.getElementById('regenMsg').innerHTML = '<span class="ok-text">Key regenerated.</span>';
+          loadDocs();
+        } else {
+          document.getElementById('regenMsg').innerHTML = `<span class="error-text">${esc(res.error)}</span>`;
+        }
+      });
+    }
+
+    async function loadStats() {
+      const el = document.getElementById('tab-stats');
+      el.innerHTML = '<div class="card">Loading…</div>';
+      const [statsRes, logsRes] = await Promise.all([
+        apiFetch(`/api/admin/connectors/${id}/stats`),
+        apiFetch(`/api/admin/connectors/${id}/logs?limit=50`)
+      ]);
+      const s = statsRes.data || {};
+      const logs = logsRes.data || [];
+
+      const boxes = [
+        ['Total requests', s.total_requests || 0],
+        ['Successful', s.successful_requests || 0],
+        ['Failed', s.failed_requests || 0],
+        ['Avg response time', s.avg_response_time_ms ? `${Math.round(s.avg_response_time_ms)}ms` : '—'],
+        ['Total tokens', s.total_tokens || 0],
+        ['Est. cost', s.total_estimated_cost != null ? `$${s.total_estimated_cost.toFixed(4)}` : '—'],
+        ['First used', fmtDate(s.first_used)],
+        ['Last used', fmtDate(s.last_used)]
+      ].map(([label, num]) => `<div class="stat-box"><div class="num">${num}</div><div class="label">${label}</div></div>`).join('');
+
+      const logRows = logs.map(l => `
+        <tr>
+          <td>${fmtDate(l.timestamp)}</td>
+          <td>${l.success ? '<span class="badge active">ok</span>' : '<span class="badge disabled">fail</span>'}</td>
+          <td>${l.response_time_ms ?? '—'}ms</td>
+          <td>${l.total_tokens ?? '—'}</td>
+          <td>${l.estimated_cost != null ? '$' + l.estimated_cost.toFixed(5) : '—'}</td>
+          <td class="muted">${esc(l.error_message || '')}</td>
+        </tr>
+      `).join('');
+
+      el.innerHTML = `
+        <div class="grid cols-3 mb" style="grid-template-columns:repeat(4,1fr);">${boxes}</div>
+        <div class="card table-wrap">
+          <strong>Recent requests</strong>
+          <table class="mt">
+            <thead><tr><th>Time</th><th>Status</th><th>Latency</th><th>Tokens</th><th>Est. cost</th><th>Error</th></tr></thead>
+            <tbody>${logRows || '<tr><td colspan="6" class="muted">No requests logged yet.</td></tr>'}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function init() {
+      const guard = await apiFetch('/api/admin/me');
+      if (!guard.success) { location.href = '/index.html'; return; }
+
+      const res = await apiFetch(`/api/admin/connectors/${id}`);
+      if (!res.success) { alert(res.error || 'Not found'); location.href = '/dashboard.html'; return; }
+      connector = res.data;
+
+      document.getElementById('cName').textContent = connector.name;
+      document.getElementById('cSlug').textContent = `/api/connectors/${connector.slug}  •  ${connector.provider} / ${connector.model}`;
+      document.getElementById('cStatus').innerHTML = `<span class="badge ${connector.status}">${connector.status}</span>`;
+      document.getElementById('editLink').href = `/connector-editor.html?id=${connector.id}`;
+
+      renderTestFields();
+    }
+
+    init();
+  </script>
+</body>
+</html>

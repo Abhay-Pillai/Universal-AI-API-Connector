@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI API Hub — Dashboard</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><div class="dot"></div><h1>AI API Hub</h1></div>
+    <div class="flex">
+      <a class="btn small" href="/dashboard.html">Dashboard</a>
+      <button class="btn small" id="logoutBtn">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="flex between mb">
+      <h2 style="margin:0;">Connectors</h2>
+      <a class="btn primary" href="/connector-editor.html">+ New connector</a>
+    </div>
+
+    <div id="listWrap"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await apiFetch('/api/admin/logout', { method: 'POST' });
+      location.href = '/index.html';
+    });
+
+    async function load() {
+      const guard = await apiFetch('/api/admin/me');
+      if (!guard.success) { location.href = '/index.html'; return; }
+
+      const res = await apiFetch('/api/admin/connectors');
+      const wrap = document.getElementById('listWrap');
+      if (!res.success) {
+        wrap.innerHTML = `<div class="card error-text">${esc(res.error || 'Failed to load connectors')}</div>`;
+        return;
+      }
+      if (!res.data.length) {
+        wrap.innerHTML = `<div class="card empty-state">No connectors yet. Create your first one to get a live AI-powered API endpoint.</div>`;
+        return;
+      }
+
+      const rows = res.data.map((c) => `
+        <tr>
+          <td><a href="/connector-detail.html?id=${c.id}"><strong>${esc(c.name)}</strong></a><div class="muted" style="font-size:12px;">/api/connectors/${esc(c.slug)}</div></td>
+          <td>${esc(c.provider)}</td>
+          <td>${esc(c.model)}</td>
+          <td>${c.input_schema.map(f => esc(f.type)).join(', ')}</td>
+          <td><span class="badge ${c.status}">${esc(c.status)}</span></td>
+          <td>${c.stats.total_requests || 0}</td>
+          <td>${fmtDate(c.stats.last_used)}</td>
+          <td>
+            <div class="flex">
+              <a class="btn small" href="/connector-detail.html?id=${c.id}">Open</a>
+              <a class="btn small" href="/connector-editor.html?id=${c.id}">Edit</a>
+              <button class="btn small danger" onclick="del('${c.id}','${esc(c.name)}')">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      wrap.innerHTML = `
+        <div class="card table-wrap">
+          <table>
+            <thead><tr><th>API</th><th>Provider</th><th>Model</th><th>Input</th><th>Status</th><th>Requests</th><th>Last used</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function del(id, name) {
+      if (!confirm(`Delete connector "${name}"? This also removes its logs. This cannot be undone.`)) return;
+      const res = await apiFetch(`/api/admin/connectors/${id}`, { method: 'DELETE' });
+      if (res.success) load();
+      else alert(res.error || 'Delete failed');
+    }
+
+    load();
+  </script>
+</body>
+</html>

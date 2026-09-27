@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI API Hub — Login</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="card login-card">
+      <div class="flex mb" style="justify-content:center;">
+        <div class="dot" style="width:12px;height:12px;border-radius:50%;background:linear-gradient(135deg,#5b8cff,#7c5bff);"></div>
+        <h1 style="margin:0;font-size:18px;">AI API Hub</h1>
+      </div>
+      <form id="loginForm">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button class="btn primary mt" style="width:100%;justify-content:center;" type="submit">Sign in</button>
+        <div id="err" class="error-text" style="display:none;"></div>
+      </form>
+    </div>
+  </div>
+  <script src="/js/api.js"></script>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('err');
+      errEl.style.display = 'none';
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const res = await apiFetch('/api/admin/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+      if (res.success) {
+        location.href = '/dashboard.html';
+      } else {
+        errEl.textContent = res.error || 'Login failed';
+        errEl.style.display = 'block';
+      }
+    });
+
+    // If already logged in, skip straight to dashboard
+    apiFetch('/api/admin/me').then((res) => { if (res.success) location.href = '/dashboard.html'; });
+  </script>
+</body>
+</html>

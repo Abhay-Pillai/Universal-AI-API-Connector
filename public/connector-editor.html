@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI API Hub — Editor</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><div class="dot"></div><h1>AI API Hub</h1></div>
+    <div class="flex">
+      <a class="btn small" href="/dashboard.html">Dashboard</a>
+      <button class="btn small" id="logoutBtn">Log out</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2 id="pageTitle">New connector</h2>
+
+    <div class="card">
+      <label>API name</label>
+      <input id="name" placeholder="e.g. Business Card Scanner">
+
+      <label>Description / purpose</label>
+      <textarea id="description" placeholder="What does this API do?"></textarea>
+
+      <div class="grid cols-2">
+        <div>
+          <label>AI provider</label>
+          <select id="provider"></select>
+        </div>
+        <div>
+          <label>Model</label>
+          <div class="flex">
+            <select id="model" style="flex:1;"></select>
+            <button class="btn small" id="refreshModels" type="button">Refresh</button>
+          </div>
+          <div class="hint" id="modelHint"></div>
+        </div>
+      </div>
+
+      <label>System instructions / prompt</label>
+      <textarea id="systemPrompt" placeholder="e.g. You are a business card extraction system. Extract the person's name, company, designation, phone, email and website from the supplied image. Return only valid JSON matching the configured output structure."></textarea>
+
+      <label>Status</label>
+      <select id="status">
+        <option value="active">Active</option>
+        <option value="disabled">Disabled</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="flex between mb">
+        <strong>Input parameters</strong>
+        <button class="btn small" type="button" id="addField">+ Add field</button>
+      </div>
+      <div class="hint mb">Types: text, number, boolean, image, file, json. These become the fields an external caller submits to your generated endpoint.</div>
+      <div id="fieldsHeader" class="field-row" style="border-bottom:2px solid var(--border);font-size:12px;color:var(--text-dim);">
+        <div>Name</div><div>Type</div><div>Required</div><div>Description</div><div>Default</div><div></div>
+      </div>
+      <div id="fieldsList"></div>
+    </div>
+
+    <div class="card">
+      <div class="flex between mb">
+        <strong>Output schema</strong>
+        <button class="btn small" type="button" id="addOutputField">+ Add field</button>
+      </div>
+      <div class="hint mb">Defines the JSON structure the API should return, e.g. name: string, total: number.</div>
+      <div id="outputHeader" class="field-row" style="grid-template-columns: 1.5fr 1fr auto; border-bottom:2px solid var(--border);font-size:12px;color:var(--text-dim);">
+        <div>Key</div><div>Type</div><div></div>
+      </div>
+      <div id="outputList"></div>
+    </div>
+
+    <div class="flex">
+      <button class="btn primary" id="saveBtn">Save connector</button>
+      <a class="btn" href="/dashboard.html">Cancel</a>
+      <span id="saveMsg"></span>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const editId = params.get('id');
+    let providers = [];
+
+    const INPUT_TYPES = ['text', 'number', 'boolean', 'image', 'file', 'json'];
+    const OUTPUT_TYPES = ['string', 'number', 'boolean', 'array', 'object'];
+
+    function fieldRowHtml(f = { name: '', type: 'text', required: true, description: '', default: '' }) {
+      const opts = INPUT_TYPES.map(t => `<option value="${t}" ${t === f.type ? 'selected' : ''}>${t}</option>`).join('');
+      return `
+        <div class="field-row" data-row>
+          <input data-k="name" value="${esc(f.name)}" placeholder="field_name">
+          <select data-k="type">${opts}</select>
+          <select data-k="required"><option value="true" ${f.required ? 'selected' : ''}>Yes</option><option value="false" ${!f.required ? 'selected' : ''}>No</option></select>
+          <input data-k="description" value="${esc(f.description || '')}" placeholder="Short description">
+          <input data-k="default" value="${esc(f.default || '')}" placeholder="Default (optional)">
+          <button class="btn small danger" type="button" onclick="this.closest('[data-row]').remove()">✕</button>
+        </div>
+      `;
+    }
+
+    function outputRowHtml(key = '', type = 'string') {
+      const opts = OUTPUT_TYPES.map(t => `<option value="${t}" ${t === type ? 'selected' : ''}>${t}</option>`).join('');
+      return `
+        <div class="field-row" style="grid-template-columns: 1.5fr 1fr auto;" data-orow>
+          <input data-k="key" value="${esc(key)}" placeholder="field_key">
+          <select data-k="type">${opts}</select>
+          <button class="btn small danger" type="button" onclick="this.closest('[data-orow]').remove()">✕</button>
+        </div>
+      `;
+    }
+
+    document.getElementById('addField').addEventListener('click', () => {
+      document.getElementById('fieldsList').insertAdjacentHTML('beforeend', fieldRowHtml());
+    });
+    document.getElementById('addOutputField').addEventListener('click', () => {
+      document.getElementById('outputList').insertAdjacentHTML('beforeend', outputRowHtml());
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await apiFetch('/api/admin/logout', { method: 'POST' });
+      location.href = '/index.html';
+    });
+
+    function populateModels(providerKey, selectedModel) {
+      const cfg = providers.find(p => p.key === providerKey);
+      const modelSelect = document.getElementById('model');
+      const hint = document.getElementById('modelHint');
+      if (!cfg) { modelSelect.innerHTML = ''; return; }
+      const models = cfg._liveModels || cfg.defaultModels;
+      modelSelect.innerHTML = models.map(m => `<option value="${esc(m)}" ${m === selectedModel ? 'selected' : ''}>${esc(m)}</option>`).join('');
+      hint.textContent = cfg.configured
+        ? (cfg.supportsImages ? 'Supports image input.' : 'Text-only provider.')
+        : `⚠ ${cfg.envVar} is not set on the server yet.`;
+    }
+
+    document.getElementById('provider').addEventListener('change', (e) => populateModels(e.target.value));
+
+    document.getElementById('refreshModels').addEventListener('click', async () => {
+      const providerKey = document.getElementById('provider').value;
+      const btn = document.getElementById('refreshModels');
+      btn.disabled = true; btn.textContent = '...';
+      const res = await apiFetch(`/api/admin/providers/${providerKey}/refresh-models`, { method: 'POST' });
+      btn.disabled = false; btn.textContent = 'Refresh';
+      if (res.success) {
+        const cfg = providers.find(p => p.key === providerKey);
+        cfg._liveModels = res.data;
+        populateModels(providerKey);
+      } else {
+        alert(res.error || 'Could not refresh models');
+      }
+    });
+
+    async function init() {
+      const guard = await apiFetch('/api/admin/me');
+      if (!guard.success) { location.href = '/index.html'; return; }
+
+      const provRes = await apiFetch('/api/admin/providers');
+      providers = provRes.data || [];
+      document.getElementById('provider').innerHTML = providers.map(p =>
+        `<option value="${p.key}">${esc(p.label)}${p.configured ? '' : ' (key not set)'}</option>`
+      ).join('');
+
+      let connector = null;
+      if (editId) {
+        document.getElementById('pageTitle').textContent = 'Edit connector';
+        const res = await apiFetch(`/api/admin/connectors/${editId}`);
+        if (!res.success) { alert(res.error || 'Not found'); location.href = '/dashboard.html'; return; }
+        connector = res.data;
+        document.getElementById('name').value = connector.name;
+        document.getElementById('description').value = connector.description || '';
+        document.getElementById('systemPrompt').value = connector.system_prompt;
+        document.getElementById('status').value = connector.status;
+        document.getElementById('provider').value = connector.provider;
+      }
+
+      populateModels(document.getElementById('provider').value, connector ? connector.model : null);
+
+      const fieldsList = document.getElementById('fieldsList');
+      const outputList = document.getElementById('outputList');
+      if (connector) {
+        fieldsList.innerHTML = connector.input_schema.map(f => fieldRowHtml(f)).join('');
+        outputList.innerHTML = Object.entries(connector.output_schema).map(([k, t]) => outputRowHtml(k, t)).join('');
+      } else {
+        fieldsList.innerHTML = fieldRowHtml({ name: 'topic', type: 'text', required: true, description: 'Main input text', default: '' });
+        outputList.innerHTML = outputRowHtml('result', 'string');
+      }
+    }
+
+    document.getElementById('saveBtn').addEventListener('click', async () => {
+      const input_schema = [...document.querySelectorAll('[data-row]')].map(row => ({
+        name: row.querySelector('[data-k="name"]').value.trim(),
+        type: row.querySelector('[data-k="type"]').value,
+        required: row.querySelector('[data-k="required"]').value === 'true',
+        description: row.querySelector('[data-k="description"]').value.trim(),
+        default: row.querySelector('[data-k="default"]').value.trim()
+      })).filter(f => f.name);
+
+      const output_schema = {};
+      [...document.querySelectorAll('[data-orow]')].forEach(row => {
+        const key = row.querySelector('[data-k="key"]').value.trim();
+        const type = row.querySelector('[data-k="type"]').value;
+        if (key) output_schema[key] = type;
+      });
+
+      const body = {
+        name: document.getElementById('name').value.trim(),
+        description: document.getElementById('description').value.trim(),
+        provider: document.getElementById('provider').value,
+        model: document.getElementById('model').value,
+        system_prompt: document.getElementById('systemPrompt').value.trim(),
+        status: document.getElementById('status').value,
+        input_schema,
+        output_schema
+      };
+
+      const msg = document.getElementById('saveMsg');
+      const res = editId
+        ? await apiFetch(`/api/admin/connectors/${editId}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await apiFetch('/api/admin/connectors', { method: 'POST', body: JSON.stringify(body) });
+
+      if (res.success) {
+        location.href = `/connector-detail.html?id=${res.data.id}`;
+      } else {
+        msg.className = 'error-text';
+        msg.textContent = res.error || 'Save failed';
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
